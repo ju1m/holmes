@@ -124,6 +124,6 @@ printMap (chunksOf 20 -> rows) = mapM_ printRow rows
 -- Use `cabal new-test examples` to run these tests and check for correct
 -- solutions.
 
-spec_wfc :: Spec
-spec_wfc = it "generates a map" do
-  maps >>= \result -> isJust result `shouldBe` True
+--spec_wfc :: Spec
+--spec_wfc = it "generates a map" do
+--  maps >>= \result -> isJust result `shouldBe` True

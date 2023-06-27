@@ -52,8 +52,17 @@ import Data.JoinSemilattice.Class.Merge (Merge)
 import Data.Kind (Type)
 import Data.Propagator (Prop)
 import qualified Data.Propagator as Prop
-import qualified Hedgehog.Gen as Gen
 import Type.Reflection (Typeable)
+
+import qualified Hedgehog as Gen
+import qualified Hedgehog.Internal.Gen as Gen
+import qualified Hedgehog.Internal.Tree as Gen
+import qualified Hedgehog.Internal.Seed as Gen
+import Debug.Trace
+import Data.IORef
+--import Data.Time.Clock.POSIX
+import System.IO.Unsafe (unsafePerformIO)
+import qualified Data.JoinSemilattice.Intersect as I
 
 -- | A monad capable of solving constraint problems using 'IO' as the
 -- evaluation type. Cells are represented using 'Data.IORef.IORef' references,
@@ -125,6 +134,8 @@ satisfying
   :: ( EqC f x
      , EqR f
      , Typeable x
+     , Show (f x)
+     , f ~ I.Intersect
      )
   => Config Holmes (f x)
   -> (forall m. MonadCell m => [ Prop m (f x) ] -> Prop m (f Bool))
@@ -140,10 +151,49 @@ satisfying (coerce -> config :: Config (MoriarT IO) (f x)) f
 --
 -- Another nice use for this function is procedural generation: often, your
 -- results will look more "natural" if you introduce an element of randomness.
-shuffle :: Config Holmes x -> Config Holmes x
+--shuffle :: Config Holmes x -> Config Holmes x
+--shuffle Config{..} = Config initial \x -> do
+--  let shuffle' = liftIO . Gen.sample . Gen.shuffle
+--  Holmes (runHolmes (refine x) >>= shuffle')
+
+shuffle :: Show x => Config Holmes x -> Config Holmes x
 shuffle Config{..} = Config initial \x -> do
-  let shuffle' = liftIO . Gen.sample . Gen.shuffle
+  let shuffle' (r::[a]) = liftIO $ do
+        s <- sample $ Gen.shuffle r
+        traceM $ "shuffle: "<> show s
+        return s
   Holmes (runHolmes (refine x) >>= shuffle')
+
+
+global :: IORef Gen.Seed
+global =
+  unsafePerformIO $ do
+    -- FIXME use /dev/urandom on posix
+    --seconds <- getPOSIXTime
+    let seconds = 222222
+    newIORef $ Gen.from (round (seconds * 1000))
+{-# NOINLINE global #-}
+
+
+random :: MonadIO m => m Gen.Seed
+random = liftIO $ atomicModifyIORef' global Gen.split
+
+sample :: MonadIO m => Gen.Gen a -> m a
+sample gen =
+  liftIO $
+    let
+      loop n =
+        if n <= 0 then
+          error "Hedgehog.Gen.sample: too many discards, could not generate a sample"
+        else do
+          seed <- random
+          case Gen.evalGen 30 seed gen of
+            Nothing ->
+              loop (n - 1)
+            Just x ->
+              pure $ Gen.treeValue x
+    in
+      loop (100 :: Int)
 
 -- | Given an input configuration, and a predicate on those input variables,
 -- return __all configurations__ that satisfy the predicate. It should be noted
@@ -153,6 +203,8 @@ whenever
   :: ( EqC f x
      , EqR f
      , Typeable x
+     , Show (f x)
+     , f ~ I.Intersect
      )
   => Config Holmes (f x)
   -> (forall m. MonadCell m => [ Prop m (f x) ] -> Prop m (f Bool))

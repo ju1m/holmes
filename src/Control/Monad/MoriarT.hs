@@ -4,6 +4,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE OverloadedLists #-}
 
 {-|
 Module      : Data.Input.Config
@@ -37,7 +38,7 @@ module Control.Monad.MoriarT
   ) where
 
 import Control.Applicative (Alternative (..))
-import Control.Monad (MonadPlus, guard)
+import Control.Monad (MonadPlus, guard, when, forM, forM_)
 import Control.Monad.Cell.Class (MonadCell (..))
 import qualified Control.Monad.Cell.Class as Cell
 import Control.Monad.IO.Class (MonadIO (..))
@@ -68,6 +69,10 @@ import qualified Data.Primitive.MutVar as MutVar
 import Data.Propagator (Prop)
 import qualified Data.Propagator as Prop
 import Type.Reflection (Typeable)
+import Debug.Trace (traceM)
+import qualified Data.HashMap.Strict as HashMap
+import qualified Data.HashSet as HashSet
+import qualified Data.JoinSemilattice.Intersect as I
 
 -- | The constraint-solving monad transformer. We implement the current
 -- computation context with 'MonadReader', and the current "no goods" list with
@@ -109,8 +114,12 @@ instance PrimMonad m => MonadCell (MoriarT m) where
     = Cell (MutVar (PrimState m) (CDCL.Rule, content, MoriarT m ()))
 
   discard = do
-    context <- Reader.ask
-    State.modify (CDCL.resolve context) -- Add this context to the "no goods" list.
+    provenance <- Reader.ask
+    old <- State.get
+    --traceM $ "discard:\n  old="<>show old<>"\n  provenance="<>show provenance
+    let res = CDCL.resolve provenance old
+    traceM $ "discard:\n  old="<>show old<>"\n  provenance="<>show provenance <> "\n  resolve="<>show res
+    State.put res -- Add this context to the "no goods" list.
     
     empty
 
@@ -143,7 +152,9 @@ instance PrimMonad m => MonadCell (MoriarT m) where
         content'    = content <<- news
 
     -- Skip this branch if the provenance is no good.
-    guard (not (nogoods `CDCL.implies` provenance'))
+    --when (nogoods `CDCL.implies` provenance') $ do
+    --  traceM $ "skip:\n  nogoods="<>show nogoods <> "\n  provenance=" <> show provenance'
+    --guard (not (nogoods `CDCL.implies` provenance'))
 
     case content' of
       Changed update -> do
@@ -190,7 +201,9 @@ solve
   :: ( PrimMonad m
      , EqR f
      , Merge (f x)
+     , Show (f x)
      , Typeable x
+     , f ~ I.Intersect
      )
   => Config (MoriarT m) (f x)
   -> (forall m'. MonadCell m' => [ Prop m' (f x) ] -> Prop m' (f Bool))
@@ -200,13 +213,34 @@ solve Config{..} predicate = do
   output <- Prop.down (predicate (map Prop.up inputs))
   Cell.write output trueR
 
-  _ <- zip [0 ..] inputs & traverse \(major, cell) -> do
-    current     <- unsafeRead cell
-    refinements <- refine current
+  traceM "TRAVERSE:"
+  forM_ (zip [0 ..] inputs) \(majorNum, cell) -> do
+    current   <- unsafeRead cell
+    traceM $ "traverse: "<>show majorNum
+    minorVals <- refine current
 
-    input <- asum $ CDCL.index major refinements <&> \(rule, content) ->
-      fmap Cell (MutVar.newMutVar (rule, content, mempty))
+    input <- asum do
+      traceM "asum"
+      let idx = CDCL.index majorNum minorVals
+      idx <&> \(provenance, minorVal) -> do
+        traceM $ "solve: input:"
+          <> "\n  majorNum=" <> show majorNum
+          <> "\n  minorVal="<>show minorVal
+          <>" \n  minorVals="<>show minorVals
+          <> "\n  provenance="<>show provenance
+          <> "\n  index="<>show idx
+        vals <- forM (zip [0 :: Int ..] inputs) \(inputNum, inputCell) -> do
+          val <- unsafeRead inputCell
+          return (inputNum, val)
+        let ambs = filter (\(_i,vs) -> HashSet.size (I.toHashSet vs) >= 2) vals
+        traceM $ "inputs: "<> show (length ambs) <> ": " <> show ambs
+        fmap Cell (MutVar.newMutVar (provenance, minorVal, mempty))
 
     Cell.unify cell input
+
+  vals <- forM (zip [0 :: Int ..] inputs) \(inputNum, inputCell) -> do
+    val <- unsafeRead inputCell
+    return (inputNum, val)
+  traceM $ "INPUTS: " <> show vals
 
   traverse unsafeRead inputs

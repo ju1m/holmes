@@ -47,6 +47,7 @@ import Data.Kind (Type)
 import Data.Propagator (Prop)
 import qualified Data.Propagator as Prop
 import Type.Reflection (Typeable)
+import qualified Data.JoinSemilattice.Intersect as I
 
 -- | A monad capable of solving constraint problems using 'ST' as the
 -- evaluation type. Cells are represented using 'Data.STRef.STRef' references,
@@ -117,6 +118,8 @@ satisfying
   :: ( EqC f x
      , EqR f
      , Typeable x
+     , Show (f x)
+     , f ~ I.Intersect
      )
   => (forall h. Config (Watson h) (f x))
   -> (forall m. MonadCell m => [ Prop m (f x) ] -> Prop m (f Bool))
@@ -132,6 +135,8 @@ whenever
   :: ( EqC f x
      , EqR f
      , Typeable x
+     , Show (f x)
+     , f ~ I.Intersect
      )
   => (forall h. Config (Watson h) (f x))
   -> (forall m. MonadCell m => [ Prop m (f x) ] -> Prop m (f Bool))

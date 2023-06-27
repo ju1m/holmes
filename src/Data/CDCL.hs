@@ -3,6 +3,8 @@
 {-# LANGUAGE GeneralisedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {-|
 Module      : Data.CDCL
@@ -39,6 +41,8 @@ import Data.Maybe (mapMaybe)
 import qualified Data.HashMap.Strict as HashMap
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
+import Debug.Trace (trace, traceM, traceShowId)
+import Data.List (foldl', intercalate, sort)
 
 -- | The index of a parameter in our computation.
 type Major = Int
@@ -50,7 +54,9 @@ type Minor = Int
 newtype Rule
   = Rule { toHashMap :: HashMap (Major, Minor) Bool }
   deriving newtype (Hashable, Monoid, Semigroup)
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Ord)
+instance Show Rule where
+  show (Rule r) = show (sort $ (\((m,_),v) -> (m,v)) <$> HashMap.toList r)
 
 -- | Generate unique rules for a set of possible values for a given parameter.
 -- For example, if we assign parameter @#1@ possible values @[1 .. 4]@, this
@@ -95,7 +101,9 @@ remove key = Rule . HashMap.delete key . toHashMap
 -- our global set, we know this computation will eventually end in failure.
 newtype Group
   = Group { toSet :: HashSet Rule }
-  deriving newtype (Monoid)
+  deriving newtype (Monoid, Eq)
+instance Show Group where
+  show (Group g) = "\n  [ " <> intercalate "\n  , " (show <$> sort (HashSet.toList g)) <> "\n  ]"
 
 instance Semigroup Group where
   Group these <> Group those

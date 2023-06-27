@@ -33,12 +33,18 @@ import Data.Kind (Type)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Prelude hiding (filter, map, unzip)
+import qualified GHC.Exts as GHC
 
 -- | A set type with intersection as the '(<>)' operation.
 newtype Intersect (x :: Type)
   = Intersect { toHashSet :: HashSet x }
-  deriving stock (Eq, Ord, Show, Foldable)
+  deriving stock (Eq, Ord, Foldable)
   deriving newtype (Hashable)
+instance Show a => Show (Intersect a) where
+  show = show . HashSet.toList . toHashSet
+instance Hashable a => GHC.IsList (Intersect a) where
+  type Item (Intersect a) = a
+  fromList = fromList
 
 class (Bounded content, Enum content, Ord content, Hashable content)
   => Intersectable content
